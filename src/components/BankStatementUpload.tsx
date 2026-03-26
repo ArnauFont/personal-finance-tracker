@@ -5,9 +5,71 @@ import { useFinance } from '@/context/FinanceContext';
 import { useCurrency } from '@/context/CurrencyContext';
 
 const MAX_PREVIEW_ROWS = 8;
+const HEADER_SCAN_LIMIT = 50;
 
 type DateFormat = 'auto' | 'mdy' | 'dmy' | 'ymd';
 type StatementType = 'balance' | 'transactions';
+
+const HEADER_MATCHERS = {
+  date: [
+    'date',
+    'fecha',
+    'f valor',
+    'fecha valor',
+    'fecha operacion',
+    'fecha operación',
+    'started date',
+    'completed date',
+    'posting date',
+    'transaction date',
+    'f.valor',
+  ],
+  concept: [
+    'concept',
+    'concepto',
+    'movimiento',
+    'descripcion',
+    'descripción',
+    'mas datos',
+    'más datos',
+    'description',
+    'details',
+    'memo',
+    'observaciones',
+    'observations',
+  ],
+  amount: [
+    'amount',
+    'importe',
+    'cargo',
+    'abono',
+    'debit',
+    'credit',
+    'withdrawal',
+    'deposit',
+    'fee',
+    'movement',
+    'movimiento',
+  ],
+  currency: [
+    'currency',
+    'divisa',
+    'moneda',
+  ],
+  product: [
+    'product',
+    'producto',
+  ],
+  balance: [
+    'balance',
+    'saldo',
+    'disponible',
+    'available balance',
+    'running balance',
+    'closing balance',
+    'ending balance',
+  ],
+};
 
 type NormalizedRow = {
   rowIndex: number;
@@ -17,7 +79,29 @@ type NormalizedRow = {
   amount: number | null;
 };
 
-const parseCsv = (text: string): string[][] => {
+const detectCsvDelimiter = (text: string): ',' | ';' | '\t' => {
+  const sample = text
+    .split(/\r?\n/)
+    .slice(0, 10)
+    .filter((line) => line.trim().length > 0);
+
+  const delimiterScores: Array<{ delimiter: ',' | ';' | '\t'; score: number }> = [
+    { delimiter: ',', score: 0 },
+    { delimiter: ';', score: 0 },
+    { delimiter: '\t', score: 0 },
+  ];
+
+  for (const line of sample) {
+    delimiterScores.forEach((entry) => {
+      entry.score += line.split(entry.delimiter).length - 1;
+    });
+  }
+
+  delimiterScores.sort((a, b) => b.score - a.score);
+  return delimiterScores[0].score > 0 ? delimiterScores[0].delimiter : ',';
+};
+
+const parseCsv = (text: string, delimiter: ',' | ';' | '\t' = ','): string[][] => {
   const rows: string[][] = [];
   let currentRow: string[] = [];
   let currentField = '';
@@ -46,7 +130,7 @@ const parseCsv = (text: string): string[][] => {
       continue;
     }
 
-    if (char === ',') {
+    if (char === delimiter) {
       currentRow.push(currentField);
       currentField = '';
       continue;
@@ -75,7 +159,76 @@ const parseCsv = (text: string): string[][] => {
   return rows.filter((row) => row.some((cell) => cell.trim() !== ''));
 };
 
-const normalizeHeader = (value: string) => value.trim().toLowerCase();
+const parseSpreadsheetFile = async (file: File): Promise<string[][]> => {
+  const extension = file.name.toLowerCase().split('.').pop();
+
+  if (extension === 'xlsx' || extension === 'xls') {
+    const XLSX = await import('xlsx');
+    const buffer = await file.arrayBuffer();
+    const workbook = XLSX.read(buffer, { type: 'array', cellDates: false });
+    const firstSheetName = workbook.SheetNames[0];
+    if (!firstSheetName) return [];
+    const worksheet = workbook.Sheets[firstSheetName];
+    const rows = XLSX.utils.sheet_to_json<(string | number | boolean | null)[]>(worksheet, {
+      header: 1,
+      raw: false,
+      defval: '',
+      blankrows: false,
+    });
+
+    return rows
+      .map((row) => row.map((cell) => String(cell ?? '').trimEnd()))
+      .filter((row) => row.some((cell) => cell.trim() !== ''));
+  }
+
+  const text = await file.text();
+  const delimiter = detectCsvDelimiter(text);
+  return parseCsv(text, delimiter);
+};
+
+const normalizeHeader = (value: string) =>
+  value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[._-]/g, ' ')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const includesAnyMatcher = (label: string, matchers: string[]) => {
+  const normalizedLabel = normalizeHeader(label);
+  return matchers.some((matcher) => normalizedLabel.includes(normalizeHeader(matcher)));
+};
+
+const detectHeaderRowIndex = (rows: string[][]) => {
+  const scanLimit = Math.min(rows.length, HEADER_SCAN_LIMIT);
+  let bestIndex = -1;
+  let bestScore = 0;
+
+  for (let rowIndex = 0; rowIndex < scanLimit; rowIndex += 1) {
+    const row = rows[rowIndex] ?? [];
+    const labels = row.map((value) => normalizeHeader(value));
+    if (!labels.some((label) => label.length > 0)) continue;
+
+    const score = [
+      ...HEADER_MATCHERS.date,
+      ...HEADER_MATCHERS.amount,
+      ...HEADER_MATCHERS.balance,
+      ...HEADER_MATCHERS.currency,
+      ...HEADER_MATCHERS.concept,
+    ].reduce((acc, matcher) => {
+      return acc + (labels.some((label) => label.includes(normalizeHeader(matcher))) ? 1 : 0);
+    }, 0);
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = rowIndex;
+    }
+  }
+
+  return bestScore >= 2 ? bestIndex : -1;
+};
 
 const toIsoDate = (year: number, month: number, day: number) => {
   const utcDate = new Date(Date.UTC(year, month - 1, day));
@@ -165,11 +318,29 @@ const parseAmount = (raw: string): number | null => {
     cleaned = cleaned.slice(1, -1);
   }
 
-  cleaned = cleaned.replace(/[$,\s]/g, '');
+  cleaned = cleaned
+    .replace(/[A-Za-z]{3}/g, '')
+    .replace(/[€$£¥₩₹]/g, '')
+    .replace(/\s/g, '');
 
   if (cleaned.startsWith('-')) {
     isNegative = true;
     cleaned = cleaned.slice(1);
+  }
+
+  const lastComma = cleaned.lastIndexOf(',');
+  const lastDot = cleaned.lastIndexOf('.');
+
+  if (lastComma > -1 && lastDot > -1) {
+    if (lastComma > lastDot) {
+      cleaned = cleaned.replace(/\./g, '').replace(',', '.');
+    } else {
+      cleaned = cleaned.replace(/,/g, '');
+    }
+  } else if (lastComma > -1) {
+    cleaned = cleaned.replace(/\./g, '').replace(',', '.');
+  } else {
+    cleaned = cleaned.replace(/,/g, '');
   }
 
   const value = Number.parseFloat(cleaned);
@@ -179,8 +350,7 @@ const parseAmount = (raw: string): number | null => {
 };
 
 const detectColumnIndex = (labels: string[], matchers: string[]) => {
-  const normalized = labels.map(normalizeHeader);
-  return normalized.findIndex((label) => matchers.some((matcher) => label.includes(matcher)));
+  return labels.findIndex((label) => includesAnyMatcher(label, matchers));
 };
 
 export const BankStatementUpload: React.FC = () => {
@@ -192,6 +362,8 @@ export const BankStatementUpload: React.FC = () => {
   const [dateColumnIndex, setDateColumnIndex] = useState(-1);
   const [balanceColumnIndex, setBalanceColumnIndex] = useState(-1);
   const [amountColumnIndex, setAmountColumnIndex] = useState(-1);
+  const [productColumnIndex, setProductColumnIndex] = useState(-1);
+  const [selectedProduct, setSelectedProduct] = useState('all');
   const [selectedAccountId, setSelectedAccountId] = useState('');
   const [dateFormat, setDateFormat] = useState<DateFormat>('auto');
   const [statementType, setStatementType] = useState<StatementType>('balance');
@@ -225,28 +397,20 @@ export const BankStatementUpload: React.FC = () => {
       setDateColumnIndex(-1);
       setBalanceColumnIndex(-1);
       setAmountColumnIndex(-1);
+      setProductColumnIndex(-1);
       return;
     }
 
     setDateColumnIndex((prev) => {
       if (prev >= 0 && prev < columnLabels.length) return prev;
-      const detected = detectColumnIndex(columnLabels, [
-        'date',
-        'posting',
-        'transaction date',
-      ]);
+      const detected = detectColumnIndex(columnLabels, HEADER_MATCHERS.date);
       return detected >= 0 ? detected : 0;
     });
 
     if (statementType === 'balance') {
       setBalanceColumnIndex((prev) => {
         if (prev >= 0 && prev < columnLabels.length) return prev;
-        const detected = detectColumnIndex(columnLabels, [
-          'balance',
-          'ending balance',
-          'closing balance',
-          'running balance',
-        ]);
+        const detected = detectColumnIndex(columnLabels, HEADER_MATCHERS.balance);
         return detected >= 0 ? detected : Math.min(1, columnLabels.length - 1);
       });
       return;
@@ -254,23 +418,42 @@ export const BankStatementUpload: React.FC = () => {
 
     setAmountColumnIndex((prev) => {
       if (prev >= 0 && prev < columnLabels.length) return prev;
-      const detected = detectColumnIndex(columnLabels, [
-        'amount',
-        'transaction',
-        'debit',
-        'credit',
-        'withdrawal',
-        'deposit',
-      ]);
+      const detected = detectColumnIndex(columnLabels, HEADER_MATCHERS.amount);
       return detected >= 0 ? detected : Math.min(1, columnLabels.length - 1);
+    });
+
+    setProductColumnIndex((prev) => {
+      if (prev >= 0 && prev < columnLabels.length) return prev;
+      const detected = detectColumnIndex(columnLabels, HEADER_MATCHERS.product);
+      return detected >= 0 ? detected : -1;
     });
   }, [columnLabels, statementType]);
 
   const valueColumnIndex = statementType === 'balance' ? balanceColumnIndex : amountColumnIndex;
 
+  const filteredDataRows = useMemo(() => {
+    if (productColumnIndex < 0 || selectedProduct === 'all') {
+      return dataRows;
+    }
+
+    return dataRows.filter((row) => (row[productColumnIndex] ?? '').trim() === selectedProduct);
+  }, [dataRows, productColumnIndex, selectedProduct]);
+
+  const availableProducts = useMemo(() => {
+    if (productColumnIndex < 0) return [];
+
+    return Array.from(
+      new Set(
+        dataRows
+          .map((row) => (row[productColumnIndex] ?? '').trim())
+          .filter((value) => value.length > 0)
+      )
+    );
+  }, [dataRows, productColumnIndex]);
+
   const normalizedRows = useMemo<NormalizedRow[]>(() => {
     if (dateColumnIndex < 0 || valueColumnIndex < 0) return [];
-    return dataRows.map((row, index) => {
+    return filteredDataRows.map((row, index) => {
       const rawDate = row[dateColumnIndex] ?? '';
       const rawValue = row[valueColumnIndex] ?? '';
       const dateIso = normalizeDate(rawDate, dateFormat);
@@ -283,7 +466,7 @@ export const BankStatementUpload: React.FC = () => {
         amount,
       };
     });
-  }, [dataRows, dateColumnIndex, valueColumnIndex, dateFormat, hasHeaderRow]);
+  }, [filteredDataRows, dateColumnIndex, valueColumnIndex, dateFormat, hasHeaderRow]);
 
   const validRows = useMemo(() => {
     return normalizedRows.filter((row) => row.dateIso && row.amount !== null);
@@ -413,22 +596,31 @@ export const BankStatementUpload: React.FC = () => {
     }
 
     try {
-      const text = await file.text();
-      const rows = parseCsv(text);
+      const rows = await parseSpreadsheetFile(file);
       if (rows.length === 0) {
-        setErrorMessage('No rows found. Please check the CSV formatting.');
+        setErrorMessage('No rows found. Please check the file formatting.');
         setRawRows([]);
         setFileName(file.name);
         return;
       }
-      setRawRows(rows);
+
+      const detectedHeaderRowIndex = detectHeaderRowIndex(rows);
+      if (detectedHeaderRowIndex > 0) {
+        setRawRows(rows.slice(detectedHeaderRowIndex));
+        setHasHeaderRow(true);
+      } else {
+        setRawRows(rows);
+      }
+
       setFileName(file.name);
       setDateColumnIndex(-1);
       setBalanceColumnIndex(-1);
       setAmountColumnIndex(-1);
+      setProductColumnIndex(-1);
+      setSelectedProduct('all');
     } catch (error) {
-      console.error('Error reading CSV file:', error);
-      setErrorMessage('Unable to read this file. Please try a different CSV.');
+      console.error('Error reading statement file:', error);
+      setErrorMessage('Unable to read this file. Please try a different CSV or Excel file.');
       setRawRows([]);
       setFileName(file.name);
     }
@@ -475,7 +667,7 @@ export const BankStatementUpload: React.FC = () => {
         </div>
 
         <div className="rounded-lg border border-blue-100 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 px-4 py-3 text-sm text-blue-700 dark:text-blue-300">
-          CSV processing happens entirely in your browser. Your file is not uploaded to a server.
+          CSV/Excel processing happens entirely in your browser. Your file is not uploaded to a server.
         </div>
 
         {statusMessage && (
@@ -493,7 +685,7 @@ export const BankStatementUpload: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div>
             <label htmlFor="account-select" className="block text-sm font-medium text-gray-700 dark:text-neutral-300 mb-2">
-              Assign to Account
+              Account to register expenses/income
             </label>
             <select
               id="account-select"
@@ -533,12 +725,12 @@ export const BankStatementUpload: React.FC = () => {
 
           <div>
             <label htmlFor="statement-upload" className="block text-sm font-medium text-gray-700 dark:text-neutral-300 mb-2">
-              CSV Bank Statement
+              Bank Statement File
             </label>
             <input
               id="statement-upload"
               type="file"
-              accept=".csv,text/csv"
+              accept=".csv,text/csv,.xlsx,.xls,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
               onChange={handleFileChange}
               className="w-full text-sm text-gray-700 dark:text-neutral-300 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700"
             />
@@ -591,6 +783,26 @@ export const BankStatementUpload: React.FC = () => {
               </div>
 
               <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-neutral-300 mb-2">Product Column (optional)</label>
+                <select
+                  value={productColumnIndex}
+                  onChange={(event) => {
+                    const nextValue = Number(event.target.value);
+                    setProductColumnIndex(nextValue);
+                    setSelectedProduct('all');
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-neutral-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-neutral-700 text-gray-900 dark:text-neutral-100"
+                >
+                  <option value={-1}>No product column</option>
+                  {columnLabels.map((label, index) => (
+                    <option key={label + index} value={index}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-neutral-300 mb-2">Date Format</label>
                 <select
                   value={dateFormat}
@@ -614,6 +826,27 @@ export const BankStatementUpload: React.FC = () => {
               />
               First row contains column headers
             </label>
+
+            {availableProducts.length > 0 && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-neutral-300 mb-2">Product Filter</label>
+                <select
+                  value={selectedProduct}
+                  onChange={(event) => setSelectedProduct(event.target.value)}
+                  className="w-full md:w-80 px-3 py-2 border border-gray-300 dark:border-neutral-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-neutral-700 text-gray-900 dark:text-neutral-100"
+                >
+                  <option value="all">All products</option>
+                  {availableProducts.map((product) => (
+                    <option key={product} value={product}>
+                      {product}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-500 dark:text-neutral-400 mt-2">
+                  Import one product at a time (e.g. Current, Deposit, Savings) and assign each to a different account.
+                </p>
+              </div>
+            )}
           </div>
         )}
 

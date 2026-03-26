@@ -81,9 +81,9 @@ NEXT_PUBLIC_ENABLE_ANALYTICS=false
 
 # Auth0 (server-side secrets must be kept secret)
 AUTH0_SECRET=your-auth0-secret
-AUTH0_DOMAIN=https://your-domain.auth0.com/
-AUTH0_CLIENT_ID=your-auth0-client-id
 AUTH0_DOMAIN=your-domain.auth0.com
+AUTH0_CLIENT_ID=your-auth0-client-id
+AUTH0_CLIENT_SECRET=your-auth0-client-secret
 APP_BASE_URL=http://localhost:3001
 # Enable Auth0 UI (set to 'true' to show login buttons)
 NEXT_PUBLIC_AUTH0_ENABLED=true

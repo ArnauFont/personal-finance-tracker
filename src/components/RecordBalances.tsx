@@ -3,6 +3,7 @@
 import { useState, useEffect, type FormEvent } from 'react';
 import { useFinance } from '@/context/FinanceContext';
 import { useCurrency } from '@/context/CurrencyContext';
+import { BankStatementUpload } from './BankStatementUpload';
 
 interface BalanceInput {
   accountId: string;
@@ -105,7 +106,7 @@ export const RecordBalances = () => {
   }
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="max-w-5xl mx-auto space-y-8">
       <div className="bg-white dark:bg-neutral-800 rounded-lg shadow-lg dark:shadow-neutral-900/50 p-6">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-gray-800 dark:text-neutral-100 mb-2">Record Account Balances</h1>
@@ -190,6 +191,8 @@ export const RecordBalances = () => {
           </div>
         </form>
       </div>
+
+      <BankStatementUpload />
     </div>
   );
 };
