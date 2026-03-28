@@ -1,0 +1,114 @@
+name: Tag merged PRs
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [master]
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  create-tag:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine next semantic version
+        id: semver
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const prNumber = context.payload.pull_request.number;
+
+            const commits = await github.paginate(github.rest.pulls.listCommits, {
+              owner,
+              repo,
+              pull_number: prNumber,
+              per_page: 100,
+            });
+
+            let bump = "patch";
+            for (const commit of commits) {
+              const message = commit.commit.message || "";
+              const header = message.split("\n")[0];
+              const hasBreakingChange = /BREAKING CHANGE:/.test(message);
+              const isBreakingHeader = /^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(?:\([^)]+\))?!:/.test(header);
+              const isFeature = /^feat(?:\([^)]+\))?:/.test(header);
+
+              if (hasBreakingChange || isBreakingHeader) {
+                bump = "major";
+                break;
+              }
+
+              if (isFeature && bump !== "major") {
+                bump = "minor";
+              }
+            }
+
+            const allTags = await github.paginate(github.rest.repos.listTags, {
+              owner,
+              repo,
+              per_page: 100,
+            });
+
+            const semverTags = allTags
+              .map((tag) => tag.name)
+              .filter((name) => /^v?\d+\.\d+\.\d+$/.test(name))
+              .map((name) => name.replace(/^v/, ""));
+
+            const parseSemver = (v) => v.split(".").map(Number);
+            semverTags.sort((a, b) => {
+              const [aMaj, aMin, aPat] = parseSemver(a);
+              const [bMaj, bMin, bPat] = parseSemver(b);
+              if (aMaj !== bMaj) return bMaj - aMaj;
+              if (aMin !== bMin) return bMin - aMin;
+              return bPat - aPat;
+            });
+
+            const latest = semverTags[0] || "0.0.0";
+            let [major, minor, patch] = parseSemver(latest);
+
+            if (bump === "major") {
+              major += 1;
+              minor = 0;
+              patch = 0;
+            } else if (bump === "minor") {
+              minor += 1;
+              patch = 0;
+            } else {
+              patch += 1;
+            }
+
+            const nextTag = `v${major}.${minor}.${patch}`;
+            core.info(`Latest tag: v${latest}`);
+            core.info(`Detected bump: ${bump}`);
+            core.info(`Next tag: ${nextTag}`);
+            core.setOutput("tag", nextTag);
+
+      - name: Create tag
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const tag = "${{ steps.semver.outputs.tag }}";
+            const sha = context.payload.pull_request.merge_commit_sha;
+
+            try {
+              await github.rest.git.createRef({
+                owner,
+                repo,
+                ref: `refs/tags/${tag}`,
+                sha,
+              });
+              core.info(`Created tag ${tag} at ${sha}`);
+            } catch (error) {
+              if (error.status === 422) {
+                core.info(`Tag ${tag} already exists. Skipping.`);
+                return;
+              }
+              throw error;
+            }
