@@ -269,7 +269,12 @@ const parseDateFromParts = (parts: string[], format: DateFormat): string | null 
       if (first > 12 && second <= 12) {
         return toIsoDate(Number(part3), second, first);
       }
-      return toIsoDate(Number(part3), first, second);
+      if (second > 12 && first <= 12) {
+        return toIsoDate(Number(part3), first, second);
+      }
+      // Ambiguous dates like 03/04/2026 default to D/M/YYYY,
+      // which matches most Spanish/EU bank statement exports.
+      return toIsoDate(Number(part3), second, first);
     }
   }
 
