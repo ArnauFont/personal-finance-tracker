@@ -34,9 +34,9 @@ jobs:
             for (const commit of commits) {
               const message = commit.commit.message || "";
               const header = message.split("\n")[0];
-              const hasBreakingChange = /BREAKING CHANGE:/m.test(message);
-              const isBreakingHeader = /^[a-z]+(?:\([^)]+\))?!:/i.test(header);
-              const isFeature = /^feat(?:\([^)]+\))?:/i.test(header);
+              const hasBreakingChange = /BREAKING CHANGE:/.test(message);
+              const isBreakingHeader = /^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(?:\([^)]+\))?!:/.test(header);
+              const isFeature = /^feat(?:\([^)]+\))?:/.test(header);
 
               if (hasBreakingChange || isBreakingHeader) {
                 bump = "major";
@@ -59,17 +59,17 @@ jobs:
               .filter((name) => /^v?\d+\.\d+\.\d+$/.test(name))
               .map((name) => name.replace(/^v/, ""));
 
-            const parse = (v) => v.split(".").map(Number);
+            const parseSemver = (v) => v.split(".").map(Number);
             semverTags.sort((a, b) => {
-              const [aMaj, aMin, aPat] = parse(a);
-              const [bMaj, bMin, bPat] = parse(b);
+              const [aMaj, aMin, aPat] = parseSemver(a);
+              const [bMaj, bMin, bPat] = parseSemver(b);
               if (aMaj !== bMaj) return bMaj - aMaj;
               if (aMin !== bMin) return bMin - aMin;
               return bPat - aPat;
             });
 
             const latest = semverTags[0] || "0.0.0";
-            let [major, minor, patch] = parse(latest);
+            let [major, minor, patch] = parseSemver(latest);
 
             if (bump === "major") {
               major += 1;
