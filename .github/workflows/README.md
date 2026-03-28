@@ -39,6 +39,6 @@ Assume the latest tag is `v1.4.2`.
    - `refactor: split sync service`
    - `chore: update tests`
    - `docs: migration guide`
-   - Footer includes `BREAKING CHANGE: sync payload now requires accountId`
+   - Commit message footer includes `BREAKING CHANGE: sync payload now requires accountId`
 
    Resulting tag: **`v2.0.0`** (major)
