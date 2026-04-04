@@ -87,26 +87,29 @@ const normalizeFromOpenBankingPayload = (payload: unknown): ExternalBalanceSnaps
     });
   });
 
-  const normalizedFromBalances: ExternalBalanceSnapshot[] = balanceList
-    .map((balance) => {
+  const normalizedFromBalances: ExternalBalanceSnapshot[] = balanceList.reduce<ExternalBalanceSnapshot[]>(
+    (acc, balance) => {
       const accountId = balance.AccountId?.trim();
-      if (!accountId) return null;
+      if (!accountId) return acc;
 
       const amountString = balance.Amount?.Amount;
       const rawAmount = typeof amountString === 'string' ? Number.parseFloat(amountString) : NaN;
-      if (Number.isNaN(rawAmount)) return null;
+      if (Number.isNaN(rawAmount)) return acc;
 
       const signAdjustedAmount = balance.CreditDebitIndicator === 'Debit' ? -Math.abs(rawAmount) : rawAmount;
       const accountMeta = accountNameMap.get(accountId);
 
-      return {
+      acc.push({
         accountName: accountMeta?.name ?? accountId,
         amount: signAdjustedAmount,
         currency: balance.Amount?.Currency ?? accountMeta?.currency,
         date: toSafeDateIso(balance.DateTime),
-      } satisfies ExternalBalanceSnapshot;
-    })
-    .filter(isNonNull);
+      });
+
+      return acc;
+    },
+    []
+  );
 
   if (normalizedFromBalances.length > 0) {
     return normalizedFromBalances;
