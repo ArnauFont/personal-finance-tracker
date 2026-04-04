@@ -55,13 +55,15 @@ If you want to enable cloud sync and user authentication:
 1. Go to [Auth0](https://auth0.com/) and create a new account if you don't have one.
 2. Create a new application in the Auth0 dashboard (select "Regular Web Application").
 3. Configure the application settings:
-  - Allowed Callback URLs: `http://localhost:3001/auth/callback`
-  - Allowed Logout URLs: `http://localhost:3001/`
-  - Allowed Web Origins: `http://localhost:3001`
+  - Allowed Callback URLs: `http://localhost:3001/auth/callback, https://<your-vercel-domain>/auth/callback`
+  - Allowed Logout URLs: `http://localhost:3001/, https://<your-vercel-domain>/`
+  - Allowed Web Origins: `http://localhost:3001, https://<your-vercel-domain>`
 4. Note down the following details from your Auth0 application:
   - Domain
   - Client ID
   - Client Secret
+
+> **Vercel deployment:** Auth0 requires the production URL in its allowed lists (see step 3 above). Replace `<your-vercel-domain>` with your Vercel project URL (e.g. `my-app.vercel.app`). The `APP_BASE_URL` environment variable is **not** required on Vercel — the deployment URL is detected automatically via `VERCEL_PROJECT_PRODUCTION_URL` / `VERCEL_URL`. Make sure to set `AUTH0_SECRET`, `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, and `AUTH0_CLIENT_SECRET` in your Vercel project's environment variables.
 
 ### MongoDB Setup
 
