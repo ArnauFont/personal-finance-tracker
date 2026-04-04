@@ -3,15 +3,20 @@ import { Auth0Client } from "@auth0/nextjs-auth0/server";
 // Resolve the base URL for the app.
 //
 // Priority:
-//  1. VERCEL_URL – per-deployment URL auto-injected by Vercel on every deployment
-//     (production and preview). Taking this first means each branch/preview
-//     deployment uses its own URL for Auth0 callbacks, enabling login on any branch.
-//  2. VERCEL_PROJECT_PRODUCTION_URL – stable production domain, used as a fallback
-//     when VERCEL_URL is not available.
-//  3. APP_BASE_URL – explicit override for non-Vercel deployments or custom domains.
+//  1. VERCEL_ENV=production + VERCEL_PROJECT_PRODUCTION_URL – use the stable
+//     production domain for production deployments.
+//  2. VERCEL_URL – per-deployment URL auto-injected by Vercel (preview/branch).
+//  3. VERCEL_PROJECT_PRODUCTION_URL – production-domain fallback when available.
+//  4. APP_BASE_URL – explicit override for non-Vercel deployments or custom domains.
 //     Must NOT be set to a localhost URL in production.
-//  4. AUTH0_BASE_URL – legacy alias for APP_BASE_URL.
+//  5. AUTH0_BASE_URL – legacy alias for APP_BASE_URL.
 const resolveAppBaseUrl = (): string | undefined => {
+  if (
+    process.env.VERCEL_ENV === "production" &&
+    process.env.VERCEL_PROJECT_PRODUCTION_URL
+  ) {
+    return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
+  }
   if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
   if (process.env.VERCEL_PROJECT_PRODUCTION_URL)
     return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
