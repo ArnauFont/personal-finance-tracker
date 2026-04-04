@@ -109,6 +109,24 @@ Use the `Add Account` and `Record Balances` screens from the app UI to start tra
 To enable cloud sync, you'll need to navigate to the `/settings` page and toggle on `Cloud Sync`. Ensure your environment variables for Auth0 and MongoDB are set up correctly.
 If cloud sync is enabled, your data will be stored in the connected MongoDB database. It will be synced as a single JSON record per user. This may not be the most efficient method for large datasets, but it keeps the implementation simple.
 
+## Open Banking Sandbox Import (CaixaBank, BBVA, Revolut)
+
+The **Bank Statements** screen includes an **Automatic Sandbox Import** section that can fetch account data directly from configured Open Banking sandbox endpoints and create/update accounts automatically.
+
+Configure these optional environment variables in `.env.local`:
+
+```env
+OPEN_BANKING_CAIXABANK_SANDBOX_URL=<caixabank sandbox base url>
+OPEN_BANKING_BBVA_SANDBOX_URL=<bbva sandbox base url>
+OPEN_BANKING_REVOLUT_SANDBOX_URL=<revolut sandbox base url>
+OPEN_BANKING_SANDBOX_TOKEN=<optional bearer token>
+```
+
+Use the provider docs listed on OpenBankingTracker to copy the sandbox URL values:
+- https://www.openbankingtracker.com/provider/caixabank
+- https://www.openbankingtracker.com/provider/bbva
+- https://www.openbankingtracker.com/provider/revolut
+
 ## Contributing
 
 Contributions are welcome — please follow these steps:
@@ -145,4 +163,3 @@ This project is licensed under the MIT License.
 ---
 
 Built with ❤️ by [Tom Shaw](https://tomshaw.dev)
-

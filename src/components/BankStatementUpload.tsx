@@ -9,6 +9,14 @@ const HEADER_SCAN_LIMIT = 50;
 
 type DateFormat = 'auto' | 'mdy' | 'dmy' | 'ymd';
 type StatementType = 'balance' | 'transactions';
+type SandboxProvider = 'caixabank' | 'bbva' | 'revolut';
+
+type SandboxAccountPayload = {
+  accountName: string;
+  amount: number;
+  currency?: string;
+  date: string;
+};
 
 const HEADER_MATCHERS = {
   date: [
@@ -354,7 +362,7 @@ const detectColumnIndex = (labels: string[], matchers: string[]) => {
 };
 
 export const BankStatementUpload: React.FC = () => {
-  const { accounts, balances, importBalances } = useFinance();
+  const { accounts, balances, importBalances, importExternalAccountBalances } = useFinance();
   const { formatCurrency } = useCurrency();
   const [fileName, setFileName] = useState('');
   const [rawRows, setRawRows] = useState<string[][]>([]);
@@ -370,6 +378,8 @@ export const BankStatementUpload: React.FC = () => {
   const [startingBalanceInput, setStartingBalanceInput] = useState('');
   const [replaceExisting, setReplaceExisting] = useState(true);
   const [isImporting, setIsImporting] = useState(false);
+  const [selectedSandboxProvider, setSelectedSandboxProvider] = useState<SandboxProvider>('caixabank');
+  const [isSandboxImporting, setIsSandboxImporting] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const valueLabel = statementType === 'balance' ? 'Balance' : 'Amount';
@@ -647,6 +657,60 @@ export const BankStatementUpload: React.FC = () => {
     }
   };
 
+  const handleSandboxImport = async () => {
+    setIsSandboxImporting(true);
+    setStatusMessage('');
+    setErrorMessage('');
+
+    try {
+      const response = await fetch(`/api/open-banking/sandbox?provider=${selectedSandboxProvider}`, {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+        },
+      });
+
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload?.error || 'Unable to fetch sandbox data.');
+      }
+
+      const sandboxAccounts = Array.isArray(payload.accounts) ? payload.accounts : [];
+      const grouped = sandboxAccounts.reduce((acc: Record<string, { amount: number; date: string }[]>, entry: SandboxAccountPayload) => {
+        if (!entry?.accountName || typeof entry?.amount !== 'number' || !entry?.date) {
+          return acc;
+        }
+        if (!acc[entry.accountName]) {
+          acc[entry.accountName] = [];
+        }
+        acc[entry.accountName].push({ amount: entry.amount, date: entry.date });
+        return acc;
+      }, {});
+
+      const importPayload = Object.entries(grouped).map(([name, snapshots]) => ({
+        name,
+        type: 'asset' as const,
+        category: 'Cash and Cash Equivalents',
+        balances: snapshots
+          .map((snapshot) => ({
+            amount: snapshot.amount,
+            date: new Date(snapshot.date),
+          }))
+          .filter((entry) => !Number.isNaN(entry.date.getTime())),
+      }));
+
+      const result = importExternalAccountBalances(importPayload, true);
+      setStatusMessage(
+        `Sandbox import complete (${selectedSandboxProvider.toUpperCase()}): created ${result.createdAccounts} account${result.createdAccounts === 1 ? '' : 's'} and imported ${result.importedBalances} balance${result.importedBalances === 1 ? '' : 's'}.`
+      );
+    } catch (error) {
+      console.error('Error importing sandbox balances:', error);
+      setErrorMessage(error instanceof Error ? error.message : 'Unable to import sandbox balances.');
+    } finally {
+      setIsSandboxImporting(false);
+    }
+  };
+
   if (accounts.length === 0) {
     return (
       <div className="text-center py-12">
@@ -668,6 +732,45 @@ export const BankStatementUpload: React.FC = () => {
 
         <div className="rounded-lg border border-blue-100 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 px-4 py-3 text-sm text-blue-700 dark:text-blue-300">
           CSV/Excel processing happens entirely in your browser. Your file is not uploaded to a server.
+        </div>
+
+        <div className="rounded-lg border border-purple-100 dark:border-purple-800 bg-purple-50 dark:bg-purple-900/20 p-4 space-y-3">
+          <div>
+            <h2 className="text-lg font-semibold text-purple-900 dark:text-purple-200">Automatic Sandbox Import</h2>
+            <p className="text-sm text-purple-700 dark:text-purple-300">
+              Import account balances automatically from Open Banking sandbox providers.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+            <div>
+              <label htmlFor="sandbox-provider" className="block text-sm font-medium text-purple-900 dark:text-purple-200 mb-2">
+                Provider
+              </label>
+              <select
+                id="sandbox-provider"
+                value={selectedSandboxProvider}
+                onChange={(event) => setSelectedSandboxProvider(event.target.value as SandboxProvider)}
+                className="w-full px-3 py-2 border border-purple-300 dark:border-purple-700 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-white dark:bg-neutral-700 text-gray-900 dark:text-neutral-100"
+              >
+                <option value="caixabank">CaixaBank</option>
+                <option value="bbva">BBVA Spain</option>
+                <option value="revolut">Revolut</option>
+              </select>
+            </div>
+            <div className="md:col-span-2 flex md:justify-end">
+              <button
+                type="button"
+                onClick={handleSandboxImport}
+                disabled={isSandboxImporting}
+                className="w-full md:w-auto px-5 py-2.5 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isSandboxImporting ? 'Importing sandbox data...' : 'Import from Sandbox'}
+              </button>
+            </div>
+          </div>
+          <p className="text-xs text-purple-700/80 dark:text-purple-300/80">
+            Configure sandbox URLs in environment variables: OPEN_BANKING_CAIXABANK_SANDBOX_URL, OPEN_BANKING_BBVA_SANDBOX_URL, OPEN_BANKING_REVOLUT_SANDBOX_URL.
+          </p>
         </div>
 
         {statusMessage && (
