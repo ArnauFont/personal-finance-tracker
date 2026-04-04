@@ -142,6 +142,24 @@ const withPath = (baseUrl: string, path: string) => {
   return `${normalizedBase}${path}`;
 };
 
+const isLocalHttpUrl = (url: URL) => {
+  if (url.protocol !== 'http:') return false;
+  return url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+};
+
+const isProduction = process.env.NODE_ENV === 'production';
+
+const isTrustedProviderHost = (provider: SandboxProvider, hostname: string) => {
+  const normalizedHost = hostname.toLowerCase();
+  const trustedHostMatchers: Record<SandboxProvider, string[]> = {
+    caixabank: ['caixabank', 'caixa', 'imagin'],
+    bbva: ['bbva'],
+    revolut: ['revolut'],
+  };
+
+  return trustedHostMatchers[provider].some((matcher) => normalizedHost.includes(matcher));
+};
+
 const fetchFirstSuccessfulPayload = async (baseUrl: string, token?: string) => {
   const candidatePaths = [
     '/accounts',
@@ -220,14 +238,18 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  if (parsedBaseUrl.protocol !== 'https:') {
+  if (parsedBaseUrl.protocol !== 'https:' && (!isLocalHttpUrl(parsedBaseUrl) || isProduction)) {
     return NextResponse.json(
-      { error: `${envKey} must use https.` },
+      { error: `${envKey} must use https (http localhost is only allowed in non-production).` },
       { status: 500 }
     );
   }
 
-  const token = process.env.OPEN_BANKING_SANDBOX_TOKEN?.trim() || undefined;
+  const configuredToken = process.env.OPEN_BANKING_SANDBOX_TOKEN?.trim();
+  const token =
+    configuredToken && isTrustedProviderHost(providerQuery, parsedBaseUrl.hostname)
+      ? configuredToken
+      : undefined;
   const fetchResult = await fetchFirstSuccessfulPayload(parsedBaseUrl.toString(), token);
 
   if (!fetchResult) {

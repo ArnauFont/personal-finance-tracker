@@ -302,20 +302,20 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const normalizedName = incomingAccount.name.trim().toLowerCase();
       if (!normalizedName) continue;
 
-      let targetAccount = accountByNormalizedName.get(normalizedName);
-
-      if (!targetAccount) {
-        targetAccount = {
+      const existingAccount = accountByNormalizedName.get(normalizedName);
+      const targetAccount = existingAccount ?? (() => {
+        const newAccount: Account = {
           id: crypto.randomUUID(),
           name: incomingAccount.name.trim(),
           type: incomingAccount.type ?? 'asset',
           category: incomingAccount.category ?? 'Cash and Cash Equivalents',
           createdAt: new Date(),
         };
-        nextAccounts.push(targetAccount);
-        accountByNormalizedName.set(normalizedName, targetAccount);
+        nextAccounts.push(newAccount);
+        accountByNormalizedName.set(normalizedName, newAccount);
         createdAccounts += 1;
-      }
+        return newAccount;
+      })();
 
       incomingAccount.balances.forEach((entry) => {
         if (!Number.isFinite(entry.amount)) return;
