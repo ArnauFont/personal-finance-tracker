@@ -63,7 +63,7 @@ If you want to enable cloud sync and user authentication:
   - Client ID
   - Client Secret
 
-> **Vercel deployment:** Auth0 requires the production URL in its allowed lists (see step 3 above). Replace `<your-vercel-domain>` with your Vercel project URL (e.g. `my-app.vercel.app`). The `APP_BASE_URL` environment variable is **not** required on Vercel — the deployment URL is detected automatically via `VERCEL_PROJECT_PRODUCTION_URL` / `VERCEL_URL`. Make sure to set `AUTH0_SECRET`, `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, and `AUTH0_CLIENT_SECRET` in your Vercel project's environment variables.
+> **Vercel deployment:** Each Vercel deployment (production and branch previews) uses its own `VERCEL_URL` automatically — no `APP_BASE_URL` is required. For login to work on preview deployments, add each preview URL to the Auth0 **Allowed Callback URLs**, **Allowed Logout URLs**, and **Allowed Web Origins** (e.g. `https://my-app-git-my-branch-username.vercel.app`). You can use a wildcard pattern like `https://*.vercel.app` in the Auth0 dashboard to cover all preview URLs at once. Make sure to set `AUTH0_SECRET`, `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, and `AUTH0_CLIENT_SECRET` in your Vercel project's environment variables.
 
 ### MongoDB Setup
 
