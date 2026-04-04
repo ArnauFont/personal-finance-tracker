@@ -9,6 +9,8 @@ type ExternalBalanceSnapshot = {
   date: string;
 };
 
+const isNonNull = <T>(value: T | null): value is T => value !== null;
+
 const PROVIDER_ENV_MAP: Record<SandboxProvider, string> = {
   caixabank: 'OPEN_BANKING_CAIXABANK_SANDBOX_URL',
   bbva: 'OPEN_BANKING_BBVA_SANDBOX_URL',
@@ -102,15 +104,15 @@ const normalizeFromOpenBankingPayload = (payload: unknown): ExternalBalanceSnaps
         amount: signAdjustedAmount,
         currency: balance.Amount?.Currency ?? accountMeta?.currency,
         date: toSafeDateIso(balance.DateTime),
-      };
+      } satisfies ExternalBalanceSnapshot;
     })
-    .filter((entry): entry is ExternalBalanceSnapshot => entry !== null);
+    .filter(isNonNull);
 
   if (normalizedFromBalances.length > 0) {
     return normalizedFromBalances;
   }
 
-  const normalizedFromAccounts = (root.accounts ?? [])
+  const normalizedFromAccounts: ExternalBalanceSnapshot[] = (root.accounts ?? [])
     .map((account) => {
       const name = account.nickname?.trim() || account.name?.trim() || account.accountId?.trim() || account.id?.trim();
       if (!name) return null;
@@ -132,7 +134,7 @@ const normalizeFromOpenBankingPayload = (payload: unknown): ExternalBalanceSnaps
         date: toSafeDateIso(account.dateTime ?? account.date),
       };
     })
-    .filter((entry): entry is ExternalBalanceSnapshot => entry !== null);
+    .filter(isNonNull);
 
   return normalizedFromAccounts;
 };

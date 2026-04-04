@@ -675,8 +675,8 @@ export const BankStatementUpload: React.FC = () => {
         throw new Error(payload?.error || 'Unable to fetch sandbox data.');
       }
 
-      const sandboxAccounts = Array.isArray(payload.accounts) ? payload.accounts : [];
-      const grouped = sandboxAccounts.reduce((acc: Record<string, { amount: number; date: string }[]>, entry: SandboxAccountPayload) => {
+      const sandboxAccounts = (Array.isArray(payload.accounts) ? payload.accounts : []) as SandboxAccountPayload[];
+      const grouped = sandboxAccounts.reduce<Record<string, { amount: number; date: string }[]>>((acc, entry) => {
         if (!entry?.accountName || typeof entry?.amount !== 'number' || !entry?.date) {
           return acc;
         }
