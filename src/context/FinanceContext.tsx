@@ -9,6 +9,18 @@ interface FinanceContextType {
   balances: Balance[];
   isLoading: boolean;
   addAccount: (account: Omit<Account, 'id' | 'createdAt'>) => void;
+  importExternalAccountBalances: (
+    accountsToImport: {
+      name: string;
+      type?: Account['type'];
+      category?: string;
+      balances: { amount: number; date: Date }[];
+    }[],
+    replaceExisting?: boolean
+  ) => {
+    createdAccounts: number;
+    importedBalances: number;
+  };
   updateBalance: (accountId: string, amount: number) => void;
   updateMultipleBalances: (updates: { accountId: string; amount: number }[], date?: Date, replaceExisting?: boolean) => void;
   importBalances: (entries: { accountId: string; amount: number; date: Date }[], replaceExisting?: boolean) => void;
@@ -263,6 +275,105 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     });
   };
 
+  const importExternalAccountBalances = (
+    accountsToImport: {
+      name: string;
+      type?: Account['type'];
+      category?: string;
+      balances: { amount: number; date: Date }[];
+    }[],
+    replaceExisting: boolean = true
+  ) => {
+    if (accountsToImport.length === 0) {
+      return {
+        createdAccounts: 0,
+        importedBalances: 0,
+      };
+    }
+
+    const accountByNormalizedName = new Map(
+      accounts.map((account) => [account.name.trim().toLowerCase(), account])
+    );
+    const nextAccounts = [...accounts];
+    const balanceEntries: { accountId: string; amount: number; date: Date }[] = [];
+    let createdAccounts = 0;
+
+    for (const incomingAccount of accountsToImport) {
+      const normalizedName = incomingAccount.name.trim().toLowerCase();
+      if (!normalizedName) continue;
+
+      const existingAccount = accountByNormalizedName.get(normalizedName);
+      const targetAccount = existingAccount ?? (() => {
+        const newAccount: Account = {
+          id: crypto.randomUUID(),
+          name: incomingAccount.name.trim(),
+          type: incomingAccount.type ?? 'asset',
+          category: incomingAccount.category ?? 'Cash and Cash Equivalents',
+          createdAt: new Date(),
+        };
+        nextAccounts.push(newAccount);
+        accountByNormalizedName.set(normalizedName, newAccount);
+        createdAccounts += 1;
+        return newAccount;
+      })();
+
+      incomingAccount.balances.forEach((entry) => {
+        if (!Number.isFinite(entry.amount)) return;
+        if (!(entry.date instanceof Date) || Number.isNaN(entry.date.getTime())) return;
+        balanceEntries.push({
+          accountId: targetAccount.id,
+          amount: entry.amount,
+          date: entry.date,
+        });
+      });
+    }
+
+    if (balanceEntries.length === 0) {
+      if (createdAccounts > 0) {
+        setAccounts(nextAccounts);
+        if (isCloudSyncAllowed()) {
+          saveUserCloudData(nextAccounts, balances);
+        }
+      }
+
+      return {
+        createdAccounts,
+        importedBalances: 0,
+      };
+    }
+
+    let mergedBalances = [...balances];
+    if (replaceExisting) {
+      const dateKeys = new Set(
+        balanceEntries.map((entry) => `${entry.accountId}|${entry.date.toISOString().split('T')[0]}`)
+      );
+      mergedBalances = mergedBalances.filter(
+        (balance) => !dateKeys.has(`${balance.accountId}|${balance.date.toISOString().split('T')[0]}`)
+      );
+    }
+
+    const newBalances: Balance[] = balanceEntries.map((entry) => ({
+      id: crypto.randomUUID(),
+      accountId: entry.accountId,
+      amount: entry.amount,
+      date: entry.date,
+    }));
+
+    mergedBalances = [...mergedBalances, ...newBalances];
+
+    setAccounts(nextAccounts);
+    setBalances(mergedBalances);
+
+    if (isCloudSyncAllowed()) {
+      saveUserCloudData(nextAccounts, mergedBalances);
+    }
+
+    return {
+      createdAccounts,
+      importedBalances: newBalances.length,
+    };
+  };
+
   const getAccountsWithBalances = (): AccountWithBalance[] => {
     return accounts.map(account => {
       // Get the most recent balance for this account
@@ -390,6 +501,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         updateBalance,
         updateMultipleBalances,
         importBalances,
+        importExternalAccountBalances,
         getAccountsWithBalances,
         updateAccount,
         deleteAccount,
